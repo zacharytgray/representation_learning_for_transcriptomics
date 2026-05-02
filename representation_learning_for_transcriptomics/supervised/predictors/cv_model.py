@@ -39,7 +39,7 @@ class CVmodel(object):
         self.cv_hyperparams = {}
 
     def fit(self, X, Y, nfolds, scorer, maximize_score=True, stratified=True,
-            **fit_kwargs):
+            random_state=None, **fit_kwargs):
         """
         Run the CV loop to find the optimal hyperparameter from a list.
         Once the optimal hyperparameter is found, the model is fit on the
@@ -68,8 +68,8 @@ class CVmodel(object):
 
             # create the model
             model = self.model_type(**self.model_kwargs)
-            # create the CV folds
-            folds = common.create_cv_folds(nfolds, stratified)
+            # create the CV folds (seeded for reproducibility)
+            folds = common.create_cv_folds(nfolds, stratified, random_state=random_state)
 
             # CV: loop over each fold
             for train_index, test_index in folds.split(X, Y):

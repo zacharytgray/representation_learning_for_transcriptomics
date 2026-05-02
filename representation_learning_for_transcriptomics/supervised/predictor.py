@@ -2,7 +2,9 @@ import numpy as np
 from pathlib import Path
 import pickle
 
-from cytoolz import identity
+# patched: dropped cytoolz dep, only one use
+def identity(x):
+    return x
 
 from .predictors import common
 from ..log import logger
@@ -104,7 +106,7 @@ class Predictor(object):
         X = self.x_transform(data)
         return self.predictor.predict(X)
 
-    def fit(self, data, labels, nfolds=5, stratified=False, **fit_kwargs):
+    def fit(self, data, labels, nfolds=5, stratified=False, random_state=None, **fit_kwargs):
         """
         Fit the predictor.
 
@@ -122,10 +124,11 @@ class Predictor(object):
         X = self.x_transform(data)
         Y = self.y_transform(labels)
         self.predictor.fit(X, Y, scorer=self.scorer,
-                           nfolds=nfolds, stratified=stratified, **fit_kwargs)
+                           nfolds=nfolds, stratified=stratified,
+                           random_state=random_state, **fit_kwargs)
 
     def cross_validate(self, data, labels, outer_folds=5, inner_folds=5,
-                       stratified=False, **fit_kwargs):
+                       stratified=False, random_state=None, **fit_kwargs):
         """
         Estimate the performance of the predictor using cross-validation.
 
@@ -144,15 +147,17 @@ class Predictor(object):
 
         """
         errors = np.zeros((outer_folds,))
-        folds = common.create_cv_folds(outer_folds, stratified)
+        folds = common.create_cv_folds(outer_folds, stratified, random_state=random_state)
         i = 0
         logger.predictor("Cross validating with {} outer folds, and {} "
                          "inner folds".format(outer_folds, inner_folds))
         for train_index, test_index in folds.split(data, labels):
             X_train, X_test = data[train_index], data[test_index]
             y_train, y_test = labels[train_index], labels[test_index]
+            # inner CV gets a derived seed so folds differ across outer iterations but stay reproducible
+            inner_seed = None if random_state is None else random_state + i + 1
             self.fit(X_train, y_train, nfolds=inner_folds, stratified=stratified,
-                     **fit_kwargs)
+                     random_state=inner_seed, **fit_kwargs)
             errors[i] = self.evaluate(X_test, y_test)
             i += 1
             logger.predictor("Fold {} error: {}".format(i, errors[i-1]))

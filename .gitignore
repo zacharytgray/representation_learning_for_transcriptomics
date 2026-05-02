@@ -107,3 +107,14 @@ ENV/
 # data files
 *.csv
 *.png
+
+# project additions: figshare data and CV outputs (not in upstream)
+data/raw/
+data/extracted/
+results/
+figures/
+notebooks/.ipynb_checkpoints/
+.DS_Store
+
+# whitelist the small published replication-target table
+!data/results_table.csv
