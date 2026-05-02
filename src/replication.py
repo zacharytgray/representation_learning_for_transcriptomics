@@ -101,7 +101,8 @@ def make_cvmodel(model_name, n_classes):
     if model_name == 'kNN':
         return CVmodel(KNNClassifier_skl, KNN_K, 'n_neighbors', n_jobs=-1)
     if model_name == 'elastic_net':
-        return CVmodel(ElasticNetLR_skl, ENET_GRID, '(C, l1_ratio)')
+        return CVmodel(ElasticNetLR_skl, ENET_GRID, '(C, l1_ratio)',
+                       random_state=SEED)
     if model_name == 'XGBoost':
         return CVmodel(XGBClassifier_skl, XGB_GRID, '(depth, n_est, lr)',
                        random_state=SEED)
@@ -147,21 +148,36 @@ def main():
     print(f'geneset={args.geneset}  CUDA available for XGBoost: {cuda_available()}')
     out_path = Path(f'results/replication_{args.geneset}.csv')
 
-    rows = []
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # resume support: if the CSV already exists, skip (task, model) pairs
+    # that landed on a previous run. each successful task appends to the CSV.
+    if out_path.exists():
+        existing = pd.read_csv(out_path)
+        done = set(zip(existing['task'], existing['model']))
+        rows = existing.to_dict('records')
+        print(f'resuming: {len(done)} (task, model) cells already on disk')
+    else:
+        done = set()
+        rows = []
+
     for task_label, group, task_name, metric in TASKS:
         path = task_path(args.geneset, group, task_name)
         if not path.exists():
             print(f'  [skip] {path} not found — run src.download first')
             continue
         for model_name in MODELS:
+            if (task_label, model_name) in done:
+                print(f'[{task_label:12s}] {model_name:11s} ... [skip, already done]')
+                continue
             print(f'[{task_label:12s}] {model_name:11s} ... ', end='', flush=True)
             r = run_one(task_label, path, metric, model_name)
             r['geneset'] = args.geneset
             rows.append(r)
+            # checkpoint after every cell — minimizes loss on crash
+            pd.DataFrame(rows).to_csv(out_path, index=False)
             print(f'mean={r["mean"]:.4f} std={r["std"]:.4f}  ({r["seconds"]:.1f}s)')
     df = pd.DataFrame(rows)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(out_path, index=False)
     print(f'\nwrote {out_path}')
     return df
 

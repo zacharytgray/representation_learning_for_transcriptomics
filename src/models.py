@@ -19,7 +19,7 @@ under one cv_param_name (e.g. "config" or "(C, l1_ratio)").
 import os
 
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, SGDClassifier
 from xgboost import XGBClassifier
 
 
@@ -68,24 +68,34 @@ class KNNClassifier_skl:
 class ElasticNetLR_skl:
     """
     Elastic-net logistic regression wrapper.
-    cv_param = (C, l1_ratio) tuple. Uses sklearn's saga solver (the only one
-    that supports penalty='elasticnet').
+    cv_param = (C, l1_ratio) tuple — same interface as the LR wrappers.
+
+    Uses SGDClassifier(loss='log_loss', penalty='elasticnet') under the hood.
+    This matches the optimizer the Smith et al. (2020) paper text describes
+    for LR (SGD-trained). LogisticRegression(solver='saga', penalty='elasticnet')
+    was tried first but is ~400x slower per fit and made the full grid infeasible
+    even on the OT geneset. SGD also produces genuinely sparse coefficients
+    (saga's L1 path leaves many tiny non-zeros that saga calls "zero" only at
+    convergence — sklearn issue #21196).
+
+    C -> alpha mapping: SGD's alpha is 1/(C * n_samples), the conventional
+    bridge between LogisticRegression's C and SGD's regularization scale.
     """
 
     def __init__(self, **kwargs):
-        # saga is the only sklearn solver supporting elasticnet penalty
-        kwargs.setdefault('solver', 'saga')
-        kwargs.setdefault('max_iter', 5000)
-        # leave tol at sklearn default (1e-4) — paper-faithful, no cpu speed compromises
+        kwargs.setdefault('loss', 'log_loss')
         kwargs.setdefault('penalty', 'elasticnet')
+        kwargs.setdefault('max_iter', 5000)
+        # tol left at sklearn default (1e-3 for SGDClassifier)
         self.model_kwargs = kwargs
         self.model = None
 
     def fit(self, X_train, Y_train, X_validate=None, Y_validate=None,
             cv_param=(1.0, 0.5), **fit_kwargs):
         C, l1_ratio = cv_param
-        self.model = LogisticRegression(
-            C=C, l1_ratio=l1_ratio, **self.model_kwargs)
+        alpha = 1.0 / (C * len(Y_train))
+        self.model = SGDClassifier(
+            alpha=alpha, l1_ratio=l1_ratio, **self.model_kwargs)
         self.model.fit(X_train, Y_train)
 
     def predict(self, X):
@@ -108,6 +118,10 @@ class XGBClassifier_skl:
     def __init__(self, **kwargs):
         kwargs.setdefault('subsample', 0.8)
         kwargs.setdefault('tree_method', 'hist')
+        # max_bin=128 (default 256) halves histogram VRAM. Required to fit
+        # max_depth=9 × 57992-feature trees in 16 GB on the 5060 Ti — the
+        # default OOM'd partway through COAD on the all-geneset run.
+        kwargs.setdefault('max_bin', 128)
         kwargs.setdefault('eval_metric', 'logloss')
         kwargs.setdefault('verbosity', 0)
         if 'device' not in kwargs:
