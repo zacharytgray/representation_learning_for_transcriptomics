@@ -1,16 +1,14 @@
-"""
-Compare our nested-CV scores against the published replication targets.
-
-  python -m src.compare              # OT geneset (Appendix A.2)
-  python -m src.compare --geneset all   # full geneset (Appendix A.1, the headline numbers)
-
-Tolerance per project plan: ±0.03 for AUC, ±0.05 for accuracy.
-"""
+# Zachary Gray
+#
+# compare our nested-CV scores vs the published replication targets.
+#   python -m src.compare
+#   python -m src.compare --geneset all
+# tolerance: +/- 0.03 AUC, +/- 0.05 accuracy.
 
 import argparse
 import pandas as pd
 
-# PROJECT_PLAN Appendix A.1: no embedding, gene_set=all, normalization=clr (the headline numbers)
+# Smith et al. (2020) supervised-results table, no embedding, gene_set=all, clr
 PUBLISHED_ALL = {
     ('COAD_stage', 'l2_LR'):       (0.6865, 'AUC'),
     ('KIRC_stage', 'l2_LR'):       (0.7900, 'AUC'),
@@ -29,7 +27,7 @@ PUBLISHED_ALL = {
     ('GSE50244',   'kNN'):         (0.6317, 'accuracy'),
 }
 
-# PROJECT_PLAN Appendix A.2: no embedding, gene_set=OT, normalization=clr (sanity check)
+# same table, gene_set=OT, clr (sanity check)
 PUBLISHED_OT = {
     ('COAD_stage', 'l2_LR'):       (0.6809, 'AUC'),
     ('KIRC_stage', 'l2_LR'):       (0.7849, 'AUC'),
@@ -85,7 +83,7 @@ def main():
     print(f'Within tolerance: {out["within_tol"].sum()}/{len(out)} '
           f'(AUC tol={TOL_AUC}, accuracy tol={TOL_ACC})')
 
-    # new-model scores (no published target)
+    # new models have no published target
     new_models = ['elastic_net', 'XGBoost']
     new = df[df['model'].isin(new_models)][['task', 'model', 'metric', 'mean', 'std']].copy()
     new['mean'] = new['mean'].round(4)

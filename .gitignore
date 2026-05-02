@@ -108,7 +108,7 @@ ENV/
 *.csv
 *.png
 
-# project additions: figshare data and CV outputs (not in upstream)
+# project additions: figshare data and CV outputs
 data/raw/
 data/extracted/
 results/

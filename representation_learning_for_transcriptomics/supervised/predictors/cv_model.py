@@ -68,7 +68,7 @@ class CVmodel(object):
 
             # create the model
             model = self.model_type(**self.model_kwargs)
-            # create the CV folds (seeded for reproducibility)
+            # seeded folds so paired comparisons are valid
             folds = common.create_cv_folds(nfolds, stratified, random_state=random_state)
 
             # CV: loop over each fold

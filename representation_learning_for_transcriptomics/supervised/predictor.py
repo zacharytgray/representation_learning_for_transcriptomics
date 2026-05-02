@@ -2,7 +2,7 @@ import numpy as np
 from pathlib import Path
 import pickle
 
-# patched: dropped cytoolz dep, only one use
+# local identity to drop cytoolz dep
 def identity(x):
     return x
 
@@ -154,7 +154,7 @@ class Predictor(object):
         for train_index, test_index in folds.split(data, labels):
             X_train, X_test = data[train_index], data[test_index]
             y_train, y_test = labels[train_index], labels[test_index]
-            # inner CV gets a derived seed so folds differ across outer iterations but stay reproducible
+            # derive inner seed so inner folds differ across outer iters but stay reproducible
             inner_seed = None if random_state is None else random_state + i + 1
             self.fit(X_train, y_train, nfolds=inner_folds, stratified=stratified,
                      random_state=inner_seed, **fit_kwargs)

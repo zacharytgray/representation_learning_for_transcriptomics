@@ -1,19 +1,10 @@
-"""
-Replication runner for the OT and "all" geneset / CLR transform.
-
-Runs all 5 supervised models (l2 LR, RF, kNN, elastic-net LR, XGBoost) under
-the paper's nested 5-fold CV protocol on the 5 chosen tasks, with a fixed
-random_state so paired-fold comparisons across models are valid.
-
-Run via:
-    python -m src.replication            # default: OT geneset
-    python -m src.replication --geneset all   # full 57992-gene set (the headline run)
-
-Output: results/replication_<geneset>.csv with one row per (task, model) pair.
-
-Hyperparameter grids match PROJECT_PLAN §5.2 in full — no trimming for runtime.
-GPU is auto-detected for XGBoost via src.models.cuda_available().
-"""
+# Zachary Gray
+#
+# nested 5-fold CV runner over 5 supervised models on the 5 chosen tasks
+# from Smith et al. (2020). fixed seed so paired-fold comparisons are valid.
+#
+#   python -m src.replication
+#   python -m src.replication --geneset all
 
 import argparse
 import warnings
@@ -35,9 +26,9 @@ from src.models import (
 
 warnings.filterwarnings('ignore')
 
-# (task_label, filename_pattern_keys, metric_name)
-# Per project plan §4 + Appendix A: GSE50244 is multiclass (accuracy), rest binary (AUC)
-# Filenames follow <geneset>_<norm>_<group>_<task>.h5 — `group` is "train" or "validate" per Tables 2-4.
+# (task_label, group, filename_task, metric)
+# GSE50244 is multiclass (accuracy); rest binary (AUC).
+# filenames are <geneset>_<norm>_<group>_<task>.h5; group is "train" or "validate".
 TASKS = [
     ('COAD_stage', 'train',    'COAD_stage', 'AUC'),
     ('KIRC_stage', 'train',    'KIRC_stage', 'AUC'),
@@ -50,23 +41,20 @@ SEED = 42
 N_OUTER = 5
 N_INNER = 5
 
-# --- hyperparameter grids: full per PROJECT_PLAN §5.2 ---
-
-# l2 LR — paper / example script
+# l2 LR grid from the original binary_test.py
 LR_C_INV = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 10, 100, 1000]
 
-# RF — example script grid (paper text differs, see PROJECT_PLAN §7.4)
+# RF max_depth grid from binary_test.py (paper text differs slightly)
 RF_DEPTHS = [4, 8, 16, 32, 64, 128]
 
-# kNN — project plan §5.2
 KNN_K = [1, 3, 5, 7, 9]
 
-# Elastic-net — project plan §5.2: C log-spaced 1e-4 to 1e2 in 8 steps; l1_ratio in {0.1, 0.5, 0.9}
+# elastic-net: C log-spaced 1e-4..1e2 in 8 steps, l1_ratio in {0.1, 0.5, 0.9} -> 24 combos
 ENET_C = list(np.logspace(-4, 2, 8))
 ENET_L1 = [0.1, 0.5, 0.9]
 ENET_GRID = list(product(ENET_C, ENET_L1))
 
-# XGBoost — project plan §5.2: depth ∈ {3, 6, 9}, n_est ∈ {100, 300}, lr ∈ {0.05, 0.1}
+# xgboost: depth in {3,6,9}, n_est in {100,300}, lr in {0.05,0.1} -> 12 combos
 XGB_DEPTH = [3, 6, 9]
 XGB_NEST = [100, 300]
 XGB_LR = [0.05, 0.1]
@@ -74,24 +62,22 @@ XGB_GRID = list(product(XGB_DEPTH, XGB_NEST, XGB_LR))
 
 
 def task_path(geneset, group, task):
-    """e.g. data/extracted/tasks_OT_clr/OT_clr_train_LGG_grade.h5"""
     return Path(f'data/extracted/tasks_{geneset}_clr/{geneset}_clr_{group}_{task}.h5')
 
 
+# load expression + labels, then standardize per the original binary_test.py
 def load_task(path):
-    """Load expression + labels from an h5 file, standardize per upstream binary_test.py."""
     with pd.HDFStore(str(path), mode='r') as store:
         X = store['expression'].values
         Y = store['labels'].values.ravel()
     mu = X.mean(axis=0)
     std = X.std(axis=0)
-    std[std == 0] = 1.0  # guard against constant features
+    std[std == 0] = 1.0  # constant-feature guard
     X = (X - mu) / std
     return X, Y
 
 
 def make_cvmodel(model_name, n_classes):
-    """Return a CVmodel configured for the given model name."""
     if model_name == 'l2_LR':
         return CVmodel(LogisticRegressor_skl, LR_C_INV, 'C^-1',
                        solver='lbfgs', max_iter=5000)
@@ -141,8 +127,7 @@ def run_one(task_label, path, metric, model_name):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--geneset', choices=['OT', 'all'], default='OT',
-                        help='which figshare geneset bundle to run on')
+    parser.add_argument('--geneset', choices=['OT', 'all'], default='OT')
     args = parser.parse_args()
 
     print(f'geneset={args.geneset}  CUDA available for XGBoost: {cuda_available()}')
@@ -150,8 +135,7 @@ def main():
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # resume support: if the CSV already exists, skip (task, model) pairs
-    # that landed on a previous run. each successful task appends to the CSV.
+    # resume support: skip (task, model) cells already in the CSV from a prior run
     if out_path.exists():
         existing = pd.read_csv(out_path)
         done = set(zip(existing['task'], existing['model']))
@@ -164,7 +148,7 @@ def main():
     for task_label, group, task_name, metric in TASKS:
         path = task_path(args.geneset, group, task_name)
         if not path.exists():
-            print(f'  [skip] {path} not found — run src.download first')
+            print(f'  [skip] {path} not found - run src.download first')
             continue
         for model_name in MODELS:
             if (task_label, model_name) in done:
@@ -174,7 +158,7 @@ def main():
             r = run_one(task_label, path, metric, model_name)
             r['geneset'] = args.geneset
             rows.append(r)
-            # checkpoint after every cell — minimizes loss on crash
+            # checkpoint after every cell; minimizes loss on crash
             pd.DataFrame(rows).to_csv(out_path, index=False)
             print(f'mean={r["mean"]:.4f} std={r["std"]:.4f}  ({r["seconds"]:.1f}s)')
     df = pd.DataFrame(rows)

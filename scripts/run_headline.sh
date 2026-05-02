@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Headline ("all" geneset) replication launcher.
-# Resumable via per-cell CSV checkpoint in src/replication.py.
+# all-geneset replication launcher; resumable via per-cell CSV checkpoint
 set -euo pipefail
 cd /home/zgray/Github/representation_learning_for_transcriptomics
 mkdir -p logs

@@ -1,18 +1,12 @@
-"""
-Post-replication analysis pass.
-
-Produces every figure and table the report needs from the two CSVs that
-src.replication.py writes:
-
-  figures/per_task_auc.png         — per-task AUC across 5 models (all geneset)
-  figures/replication_scatter.png  — ours vs published (OT + all)
-  figures/shifted_statistic.png    — Smith Fig. 3 style across-task summary
-  results/elasticnet_sparsity.csv  — nonzero-coef counts per task (CV-selected hyperparams)
-  results/topk_overlap.csv         — top-K gene overlap between l2 LR and elastic-net rankings
-
-Run:
-  python -m src.analysis
-"""
+# Zachary Gray
+#
+# post-replication analysis: figures + sparsity table + top-K gene overlap.
+# reads results/replication_{OT,all}.csv, writes:
+#   figures/per_task_auc.png
+#   figures/replication_scatter.png
+#   figures/shifted_statistic.png
+#   results/elasticnet_sparsity_<geneset>.csv
+#   results/topk_overlap_<geneset>.csv
 
 import warnings
 from itertools import product
@@ -54,7 +48,7 @@ def load_replication(geneset):
     return df
 
 
-# --- figure 1: per-task AUC bar chart on the all geneset ---
+# per-task bar chart, all geneset
 def per_task_bar(df_all):
     tasks = [t for t, *_ in TASKS]
     models = MODELS
@@ -83,7 +77,7 @@ def per_task_bar(df_all):
     print('wrote figures/per_task_auc.png')
 
 
-# --- figure 2: replication scatter (ours vs published) ---
+# ours vs published scatter, both genesets
 def replication_scatter(df_ot, df_all):
     fig, ax = plt.subplots(figsize=(5.5, 5.5))
     for label, df, pub_dict, marker in [('OT', df_ot, PUBLISHED_OT, 'o'),
@@ -98,7 +92,7 @@ def replication_scatter(df_ot, df_all):
         ax.scatter(xs, ys, marker=marker, s=42, alpha=0.85, label=f'{label} geneset')
     lo, hi = 0.5, 0.85
     ax.plot([lo, hi], [lo, hi], color='grey', linestyle='--', linewidth=0.8)
-    # tolerance bands
+    # +/- 0.03 AUC tolerance band
     ax.fill_between([lo, hi], [lo - 0.03, hi - 0.03], [lo + 0.03, hi + 0.03],
                     color='grey', alpha=0.1, label='±0.03 AUC tol')
     ax.set_xlabel('Published score (Smith et al. 2020)')
@@ -115,9 +109,8 @@ def replication_scatter(df_ot, df_all):
     print('wrote figures/replication_scatter.png')
 
 
-# --- figure 3: shifted-statistic plot (Smith Fig. 3 style) ---
+# Smith Fig.3 style: per-task model offset from across-model median
 def shifted_statistic(df_all):
-    """Per task, subtract the across-model median; plot each model's offset across tasks."""
     tasks = [t for t, *_ in TASKS]
     fig, ax = plt.subplots(figsize=(8, 4.5))
     rows = []
@@ -145,11 +138,9 @@ def shifted_statistic(df_all):
     print('wrote figures/shifted_statistic.png')
 
 
-# --- table: elastic-net sparsity ---
+# per task: pick (C, l1_ratio) by 5-fold CV on full data, refit, count nonzero coefs.
+# also runs a matched l2-LR refit so we can compare AUC at the chosen sparsity.
 def elasticnet_sparsity(geneset='all'):
-    """For each task, pick (C, l1_ratio) by 5-fold CV mean AUC on the full task data,
-    refit on all data with those params, count nonzero coefs.
-    Comparable l2 LR refit included for context."""
     rows = []
     for task_label, group, task_name, metric in TASKS:
         path = task_path(geneset, group, task_name)
@@ -158,7 +149,6 @@ def elasticnet_sparsity(geneset='all'):
         X, Y = load_task(path)
         n_classes = len(np.unique(Y))
         skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
-        # search elastic-net grid by mean fold AUC (or accuracy if multiclass)
         from sklearn.metrics import roc_auc_score, accuracy_score
         is_binary = n_classes == 2
         best = (None, -np.inf)
@@ -178,14 +168,14 @@ def elasticnet_sparsity(geneset='all'):
             if mean > best[1]:
                 best = ((C, l1), mean)
         C_star, l1_star = best[0]
-        # final refit
+        # refit with CV-selected hyperparams
         en = SGDClassifier(loss='log_loss', penalty='elasticnet',
                            alpha=1.0 / (C_star * len(Y)), l1_ratio=l1_star,
                            max_iter=5000, random_state=SEED)
         en.fit(X, Y)
         en_nonzero = int(np.sum(np.abs(en.coef_) > 1e-10))
 
-        # comparable l2 LR refit (best C by inner CV) — for the "did sparsity cost AUC" comparison
+        # matched l2-LR refit at its own CV-best C
         best_lr = (None, -np.inf)
         for C in LR_C_INV:
             scores = []
@@ -226,10 +216,9 @@ def elasticnet_sparsity(geneset='all'):
     return out
 
 
-# --- topK gene overlap (optional) ---
+# refit l2-LR (best C) and elastic-net (best C, l1) on each task; compare top-K
+# feature rankings by |coef|.
 def topk_overlap(geneset='all', k=50):
-    """Refit l2 LR (best C) and elastic-net (best (C,l1)) on each task's full data,
-    rank features by |coef|, report top-K Jaccard overlap."""
     from sklearn.metrics import roc_auc_score, accuracy_score
     rows = []
     for task_label, group, task_name, metric in TASKS:
@@ -270,7 +259,7 @@ def topk_overlap(geneset='all', k=50):
                 best_lr = (C, np.mean(scores))
         lr = LogisticRegression(C=best_lr[0], solver='lbfgs', max_iter=5000).fit(X, Y)
 
-        # collapse coefs to per-feature importance
+        # collapse multiclass coefs to per-feature importance via |coef| sum
         en_imp = np.abs(en.coef_).sum(axis=0)
         lr_imp = np.abs(lr.coef_).sum(axis=0)
         en_top = set(np.argsort(en_imp)[::-1][:k])

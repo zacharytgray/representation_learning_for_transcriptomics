@@ -1,12 +1,9 @@
-"""
-Pull the figshare data tarballs and extract just the 5 task files we need.
-
-  python -m src.download                # default: OT only (101 MB)
-  python -m src.download --all          # also fetch the 2.96 GB "all" tarball
-  python -m src.download --skip-ot      # only fetch "all"
-
-Direct figshare URLs come from PROJECT_PLAN §7.3.
-"""
+# Zachary Gray
+#
+# pull the figshare data tarballs and extract just the 5 task files we need.
+#   python -m src.download              # OT only (101 MB)
+#   python -m src.download --all        # also fetch the 2.96 GB 'all' tarball
+#   python -m src.download --skip-ot    # only 'all'
 
 import argparse
 import shutil
@@ -15,7 +12,7 @@ import sys
 import tarfile
 from pathlib import Path
 
-# (label, url, raw_filename, extracted_dir_inside_tar)
+# (label, url, raw_filename, dir_inside_tar)
 BUNDLES = {
     'OT':  ('https://ndownloader.figshare.com/files/14546465',
             'tasks_OT_clr.tar.gz',  'tasks_OT_clr'),
@@ -23,8 +20,7 @@ BUNDLES = {
             'tasks_all_clr.tar.gz', 'tasks_all_clr'),
 }
 
-# Our 5 chosen tasks — matches src.replication.TASKS.
-# (group, task_name) — final filename inside the tar is f'{geneset}_clr_{group}_{task_name}.h5'
+# (group, task_name); inside-tar filename is f'{geneset}_clr_{group}_{task_name}.h5'
 WANTED_TASKS = [
     ('train',    'COAD_stage'),
     ('train',    'KIRC_stage'),
@@ -33,7 +29,7 @@ WANTED_TASKS = [
     ('validate', 'GSE50244'),
 ]
 
-# Small published replication-target table (PROJECT_PLAN §7.3, file 14545823)
+# small published replication-target CSV (figshare file 14545823)
 RESULTS_CSV_URL = 'https://ndownloader.figshare.com/files/14545823'
 
 DATA_RAW = Path('data/raw')
@@ -43,15 +39,15 @@ DATA_EXT = Path('data/extracted')
 def download(url, dest):
     dest.parent.mkdir(parents=True, exist_ok=True)
     print(f'  curl -> {dest}')
-    # -C - resumes partial downloads; -L follows redirects
+    # -C - resumes partial downloads, -L follows redirects
     subprocess.run(
         ['curl', '-sSL', '-o', str(dest), '-C', '-', url],
         check=True,
     )
 
 
+# pull only the 5 task .h5 files we use
 def extract_tasks(tar_path, geneset, out_root):
-    """Extract only the 5 task .h5 files we care about."""
     inner_dir = BUNDLES[geneset][2]
     wanted = {f'{inner_dir}/{geneset}_clr_{group}_{task}.h5'
               for group, task in WANTED_TASKS}
